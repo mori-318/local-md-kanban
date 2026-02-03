@@ -22,10 +22,10 @@ pub fn get_tasks(folder_path: String) -> Result<Vec<Task>, String> {
         let entry = entry.map_err(|e| e.to_string())?;
         let file_path = entry.path();
 
-        // .mdファイルのみ処理（template.mdは除外）
+        // .mdファイルのみ処理（template.mdとtask-naming.mdは除外）
         if file_path.extension().map_or(false, |ext| ext == "md") {
             let file_name = file_path.file_name().unwrap_or_default().to_string_lossy();
-            if file_name == "template.md" {
+            if file_name == "template.md" || file_name == "task-naming.md" {
                 continue;
             }
 
