@@ -130,17 +130,29 @@ pub fn create_task_folder(
     fs::create_dir(&new_folder_path).map_err(|e| e.to_string())?;
 
     // リソースからtemplate.mdを読み込む
-    let resource_path = app_handle
+    let template_path = app_handle
         .path_resolver()
         .resolve_resource("resources/template.md")
         .ok_or("テンプレートファイルが見つかりません")?;
 
-    let template_content = fs::read_to_string(&resource_path)
+    let template_content = fs::read_to_string(&template_path)
         .map_err(|e| format!("テンプレートの読み込みに失敗: {}", e))?;
 
     // 新しいフォルダにtemplate.mdをコピー
     let template_dest = new_folder_path.join("template.md");
     fs::write(&template_dest, template_content).map_err(|e| e.to_string())?;
+
+    // タスク命名ガイドをコピー
+    let naming_path = app_handle
+        .path_resolver()
+        .resolve_resource("resources/task-naming.md")
+        .ok_or("タスク命名ガイドが見つかりません")?;
+
+    let naming_content = fs::read_to_string(&naming_path)
+        .map_err(|e| format!("命名ガイドの読み込みに失敗: {}", e))?;
+
+    let naming_dest = new_folder_path.join("task-naming.md");
+    fs::write(&naming_dest, naming_content).map_err(|e| e.to_string())?;
 
     Ok(new_folder_path.to_string_lossy().to_string())
 }

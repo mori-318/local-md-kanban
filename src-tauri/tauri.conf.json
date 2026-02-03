@@ -49,7 +49,7 @@
         "providerShortName": null,
         "signingIdentity": null
       },
-      "resources": ["resources/template.md"],
+      "resources": ["resources/template.md", "resources/task-naming.md"],
       "shortDescription": "",
       "targets": "all",
       "windows": {
