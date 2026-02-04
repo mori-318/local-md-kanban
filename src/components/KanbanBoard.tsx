@@ -94,6 +94,23 @@ function KanbanBoard({ folderPath, onBackToHome }: KanbanBoardProps) {
   };
 
   /**
+   * over.idからステータスを取得する
+   * over.idがステータス名の場合はそのまま返し、
+   * タスクのfilePathの場合はそのタスクのステータスを返す
+   */
+  const getStatusFromOverId = useCallback(
+    (overId: string): Status | null => {
+      if (STATUSES.includes(overId as Status)) {
+        return overId as Status;
+      }
+      // over.idがタスクのfilePathの場合、そのタスクのステータスを取得
+      const overTask = localTasks.find((t) => t.filePath === overId);
+      return overTask ? overTask.status : null;
+    },
+    [localTasks]
+  );
+
+  /**
    * ドラッグ終了時のハンドラ
    */
   const handleDragEnd = async (event: DragEndEvent) => {
@@ -119,9 +136,9 @@ function KanbanBoard({ folderPath, onBackToHome }: KanbanBoardProps) {
     const task = localTasks.find((t) => t.filePath === taskId);
     if (!task) return;
 
-    // ドロップ先がステータスカラムかチェック（元のステータスと比較）
-    const newStatus = over.id as Status;
-    if (STATUSES.includes(newStatus) && currentOriginalStatus !== newStatus) {
+    // ドロップ先のステータスを取得（カラムまたはタスクの上）
+    const newStatus = getStatusFromOverId(over.id as string);
+    if (newStatus && currentOriginalStatus !== newStatus) {
       const updatedTask = { ...task, status: newStatus };
       await saveTask(updatedTask);
     }
@@ -135,14 +152,19 @@ function KanbanBoard({ folderPath, onBackToHome }: KanbanBoardProps) {
     if (!over) return;
 
     const taskId = active.id as string;
-    const newStatus = over.id as Status;
+    const newStatus = getStatusFromOverId(over.id as string);
 
-    if (STATUSES.includes(newStatus)) {
-      setLocalTasks((prev) =>
-        prev.map((t) =>
+    if (newStatus) {
+      setLocalTasks((prev) => {
+        const currentTask = prev.find((t) => t.filePath === taskId);
+        // 同じステータスなら更新しない
+        if (currentTask?.status === newStatus) {
+          return prev;
+        }
+        return prev.map((t) =>
           t.filePath === taskId ? { ...t, status: newStatus } : t
-        )
-      );
+        );
+      });
     }
   };
 
