@@ -26,6 +26,10 @@ fn main() {
             commands::create_task,
             commands::delete_task,
             commands::create_task_folder,
+            commands::check_git_repo,
+            commands::get_git_branches,
+            commands::get_current_branch,
+            commands::git_sync,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

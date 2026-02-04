@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   DndContext,
@@ -12,12 +12,16 @@ import {
   closestCenter,
   MeasuringStrategy,
 } from "@dnd-kit/core";
-import { Task, Status } from "../types";
+import { Task, Status, GitSettings } from "../types";
 import { useTasks } from "../hooks/useTasks";
+import { useGitSync } from "../hooks/useGitSync";
 import KanbanColumn from "./KanbanColumn";
 import TaskCard from "./TaskCard";
 import TaskModal from "./TaskModal";
 import SortSelector from "./SortSelector";
+
+const GIT_SETTINGS_KEY = "local-md-kanban-git-settings";
+const DEFAULT_GIT_SETTINGS: GitSettings = { syncBranch: "main" };
 
 interface KanbanBoardProps {
   folderPath: string;
@@ -43,11 +47,25 @@ function KanbanBoard({ folderPath, onBackToHome }: KanbanBoardProps) {
     changeSortOption,
   } = useTasks(folderPath);
 
+  const {
+    isGitRepo,
+    branches,
+    currentBranch,
+    isSyncing,
+    lastSyncResult,
+    isChecking,
+    sync,
+  } = useGitSync(folderPath);
+
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isNewTask, setIsNewTask] = useState(false);
   const [localTasks, setLocalTasks] = useState<Task[]>([]);
   const [draggingTask, setDraggingTask] = useState<Task | null>(null);
   const [originalStatus, setOriginalStatus] = useState<Status | null>(null);
+  const [gitSettings, setGitSettings] = useState<GitSettings>(DEFAULT_GIT_SETTINGS);
+  const [showBranchDropdown, setShowBranchDropdown] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const initialSyncDone = useRef(false);
 
   // ドラッグセンサーの設定
   const sensors = useSensors(
@@ -74,6 +92,69 @@ function KanbanBoard({ folderPath, onBackToHome }: KanbanBoardProps) {
   useEffect(() => {
     setLocalTasks(tasks);
   }, [tasks]);
+
+  // Git設定の読み込み
+  useEffect(() => {
+    const saved = localStorage.getItem(GIT_SETTINGS_KEY);
+    if (saved) {
+      try {
+        setGitSettings(JSON.parse(saved));
+      } catch {
+        setGitSettings(DEFAULT_GIT_SETTINGS);
+      }
+    }
+  }, []);
+
+  /**
+   * 同期先ブランチを変更
+   */
+  const handleBranchChange = (branch: string) => {
+    const newSettings = { ...gitSettings, syncBranch: branch };
+    setGitSettings(newSettings);
+    localStorage.setItem(GIT_SETTINGS_KEY, JSON.stringify(newSettings));
+    setShowBranchDropdown(false);
+  };
+
+  /**
+   * Git同期を実行
+   */
+  const handleSync = useCallback(async () => {
+    if (!isGitRepo || isSyncing) return;
+
+    setSyncMessage(null);
+    const result = await sync(gitSettings.syncBranch);
+    setSyncMessage(result.message);
+
+    // 同期後にタスクを再読み込み
+    if (result.pulled) {
+      await loadTasks();
+    }
+
+    // メッセージを3秒後に消す
+    setTimeout(() => setSyncMessage(null), 3000);
+  }, [isGitRepo, isSyncing, sync, gitSettings.syncBranch, loadTasks]);
+
+  // フォルダ選択時の自動同期
+  useEffect(() => {
+    if (!isChecking && isGitRepo && !initialSyncDone.current) {
+      initialSyncDone.current = true;
+      handleSync();
+    }
+  }, [isChecking, isGitRepo, handleSync]);
+
+  // ドロップダウン外クリックで閉じる
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (showBranchDropdown) {
+        const target = event.target as HTMLElement;
+        if (!target.closest('[data-branch-dropdown]')) {
+          setShowBranchDropdown(false);
+        }
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showBranchDropdown]);
 
   /**
    * ステータス別にタスクをフィルタ
@@ -174,7 +255,6 @@ function KanbanBoard({ folderPath, onBackToHome }: KanbanBoardProps) {
   const handleCreateTask = useCallback(async () => {
     const now = new Date();
     const datetime = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}-${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-    const date = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 
     const newTask: Task = {
       filePath: "",
@@ -183,7 +263,7 @@ function KanbanBoard({ folderPath, onBackToHome }: KanbanBoardProps) {
       updated: datetime,
       status: "未着手",
       priority: "低",
-      due: date,
+      due: "-",
       assignee: "-",
       subTasks: [],
       memo: "",
@@ -267,7 +347,7 @@ function KanbanBoard({ folderPath, onBackToHome }: KanbanBoardProps) {
           <p className="text-red-500 mb-4">エラー: {error}</p>
           <button
             onClick={onBackToHome}
-            className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200"
+            className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200 active:bg-gray-300 transition-colors"
           >
             戻る
           </button>
@@ -284,19 +364,77 @@ function KanbanBoard({ folderPath, onBackToHome }: KanbanBoardProps) {
           <div className="flex items-center gap-4">
             <button
               onClick={onBackToHome}
-              className="text-gray-500 hover:text-gray-700"
+              className="text-gray-500 hover:text-gray-700 active:text-gray-900 transition-colors"
             >
               ← 戻る
             </button>
             <h1 className="text-lg font-semibold text-gray-800">
               {folderPath.split("/").pop()}
             </h1>
+            {/* 同期状態表示 */}
+            {(isChecking || isSyncing) && (
+              <span className="text-sm text-blue-600 flex items-center gap-2">
+                <span className="inline-block w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></span>
+                {isChecking ? "Git確認中..." : "同期中..."}
+              </span>
+            )}
+            {/* 同期メッセージ */}
+            {syncMessage && !isSyncing && (
+              <span className={`text-sm ${lastSyncResult?.conflicts ? 'text-red-500' : 'text-green-600'}`}>
+                {syncMessage}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-3">
+            {/* Git同期ボタン（Git管理されている場合のみ表示） */}
+            {isGitRepo && (
+              <>
+                <button
+                  onClick={handleSync}
+                  disabled={isSyncing || isChecking}
+                  className={`px-3 py-2 text-sm rounded-lg flex items-center gap-2 transition-colors ${
+                    isSyncing || isChecking
+                      ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                      : "bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300"
+                  }`}
+                  title="Git同期"
+                >
+                  {isSyncing ? "同期中..." : "↻ 同期"}
+                </button>
+                {/* ブランチ選択 */}
+                <div className="relative" data-branch-dropdown>
+                  <button
+                    onClick={() => setShowBranchDropdown(!showBranchDropdown)}
+                    className="px-3 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 active:bg-gray-300 transition-colors flex items-center gap-1"
+                  >
+                    <span className="max-w-[100px] truncate">{gitSettings.syncBranch}</span>
+                    <span className="text-xs">▼</span>
+                  </button>
+                  {showBranchDropdown && (
+                    <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
+                      {branches.map((branch) => (
+                        <button
+                          key={branch}
+                          onClick={() => handleBranchChange(branch)}
+                          className={`w-full px-4 py-2 text-left text-sm transition-colors hover:bg-gray-100 active:bg-gray-200 ${
+                            branch === gitSettings.syncBranch ? "bg-blue-50 text-blue-600 hover:bg-blue-100 active:bg-blue-200" : ""
+                          }`}
+                        >
+                          {branch}
+                          {branch === currentBranch && (
+                            <span className="ml-2 text-xs text-gray-400">(現在)</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
             <SortSelector value={sortOption} onChange={changeSortOption} />
             <button
               onClick={handleCreateTask}
-              className="px-4 py-2 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600"
+              className="px-4 py-2 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600 active:bg-blue-700 transition-colors"
             >
               + 新規タスク
             </button>

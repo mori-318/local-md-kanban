@@ -77,3 +77,20 @@ export const STATUS_COLORS: Record<Status, string> = {
   着手中: "#eab308",
   完了: "#22c55e",
 };
+
+/**
+ * Git同期結果
+ */
+export interface SyncResult {
+  pulled: boolean;
+  pushed: boolean;
+  conflicts: boolean;
+  message: string;
+}
+
+/**
+ * Git設定
+ */
+export interface GitSettings {
+  syncBranch: string;
+}
